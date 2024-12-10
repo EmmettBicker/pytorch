@@ -332,6 +332,40 @@ static std::tuple<Tensor, std::optional<int64_t>> log_sigmoid_backward_batch_rul
   return std::make_tuple(at::log_sigmoid_backward(out_grad, out_self, out_buffer), 0);
 }
 
+static std::tuple<Tensor, std::optional<int64_t>> _make_dual_batch_rule(
+    const Tensor& primal, std::optional<int64_t> primal_bdim,
+    const Tensor& tangent, std::optional<int64_t> tangent_bdim,
+    int64_t level) {
+  
+  auto [primal_, tangent_]= _binary_pointwise_helper(primal, primal_bdim, tangent, tangent_bdim);
+
+  return std::make_tuple(at::_make_dual(primal_, tangent_, level), 0);
+}
+
+static
+std::tuple<Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>>
+_unpack_dual_batch_rule(
+    const Tensor& dual, std::optional<int64_t> dual_bdim,
+    int64_t level) {
+    auto device_str = dual.device().str();
+    std::cout << "Input tensor device: " << device_str << std::endl;
+    
+    auto dual_ = moveBatchDimToFront(dual, dual_bdim);  
+    std::cout << "After move batch dim device: " << dual_.device().str() << std::endl;
+    auto device = dual_.device();
+
+    auto [primal, tangent] = at::_unpack_dual(dual_, level);
+    std::cout << "After unpack_dual" << std::endl;  // Add this
+    primal = primal.to(device);
+    std::cout << "After primal to" << std::endl;    // Add this
+    tangent = tangent.to(device);
+    std::cout << "After tangent to" << std::endl;   // Add this
+    
+    return std::make_tuple(primal, 0, tangent, 0);
+}
+
+
+
 static Tensor binomial_wrapper(const Tensor& count, const Tensor& prob, std::optional<Generator> gen) {
   return at::binomial(count, prob.contiguous(), std::move(gen)); // Bug in PyTorch, prob shouldn't need to be contiguous
 }
@@ -475,6 +509,8 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   BINARY_POINTWISE(logit_backward);
   VMAP_SUPPORT(log_sigmoid_backward, log_sigmoid_backward_batch_rule);
   VMAP_SUPPORT(gelu_backward, gelu_backward_batch_rule);
+  VMAP_SUPPORT(_make_dual, _make_dual_batch_rule)
+  VMAP_SUPPORT(_unpack_dual, _unpack_dual_batch_rule)
   BINARY_POINTWISE(sigmoid_backward);
   POINTWISE_BOXED(softplus_backward);
   BINARY_POINTWISE(softshrink_backward);
